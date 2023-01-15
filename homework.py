@@ -2,9 +2,9 @@ import logging
 import os
 import sys
 import time
-
 import requests
 import telegram
+
 from dotenv import load_dotenv
 from http import HTTPStatus
 
@@ -25,18 +25,25 @@ HOMEWORK_VERDICTS = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 
-PARSE_STATUS_PHRASE = 'Изменился статус проверки работы "{}". {}'
+PARSE_STATUS = 'Изменился статус проверки работы "{}". {}'
+GET_API_ANSWER = ('Ошибка запроса к API адресу: {},'
+                  'link = {}, headers = {}, params = {}')
+CHECK_RESPONSE = ('Возвращен неверный тип данных. Ожидается - dict,'
+                  'а получен - {}')
+PARSE_STATUS_ERROR = 'Получен неизвестный статус - {}.'
+MAIN = 'Сбой в работе программы: {}'
 
 
 def check_tokens():
     """.
     Проверяет доступность переменных окружения.
     """
-    token_list = [PRACTICUM_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_TOKEN]
+    token_list = ['PRACTICUM_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN']
     for token in token_list:
-        if token is None:
+        if globals()[token] is None:
             logging.critical(f'Отсутствует токен - {token}')
-    return all(token_list)
+            return False
+    return True
 
 
 def send_message(bot, message):
@@ -59,17 +66,23 @@ def get_api_answer(timestamp):
         response_from_api = requests.get(ENDPOINT,
                                          headers=HEADERS,
                                          params=payload)
+    # Тут я попытался обработать ислючение, но пайтест не пропускает почему-то
+    # except requests.RequestException as error:
+        # raise requests.RequestException(
     except Exception as error:
-        raise Exception(f'Ошибка запроса к API адресу: {error}'
-                        f'link = {ENDPOINT}, '
-                        f'headers = {HEADERS}, '
-                        f'params = {payload}')
+        raise Exception(
+            GET_API_ANSWER.format(error, ENDPOINT, HEADERS, payload)
+        )
 
     if response_from_api.status_code != HTTPStatus.OK:
-        raise Exception(
-            f'Ошибка API запроса - {response_from_api.status_code}'
+        raise requests.HTTPError(
+            GET_API_ANSWER.format(response_from_api.status_code, ENDPOINT,
+                                  HEADERS, payload)
         )
     response = response_from_api.json()
+    if response.get('error') or response.get('code') is not None:
+        raise ValueError(GET_API_ANSWER.format(response, ENDPOINT,
+                                               HEADERS, payload))
     return response
 
 
@@ -78,17 +91,15 @@ def check_response(response):
     Проверяет ответ API на соответствие документации.
     """
     if not isinstance(response, dict):
-        raise TypeError('Возвращен неверный тип данных. Ожидается - dict, '
-                        f'а получен - {type(response)}')
+        raise TypeError(CHECK_RESPONSE.format(type(response)))
 
     try:
-        homeworks_list = response['homeworks']
-        if not isinstance(homeworks_list, list):
-            raise TypeError('Возвращен неверный тип данных. Ожидается - dict, '
-                            f'а получен - {type(homeworks_list)}')
+        homeworks = response['homeworks']
+        if not isinstance(homeworks, list):
+            raise TypeError(CHECK_RESPONSE.format(type(response)))
     except KeyError:
         raise KeyError('Возвращен ответ без ключа homeworks')
-    return homeworks_list
+    return homeworks[0]
 
 
 def parse_status(homework):
@@ -102,46 +113,34 @@ def parse_status(homework):
     homework_name = homework.get('homework_name')
     status = homework.get('status')
     if status not in HOMEWORK_VERDICTS.keys():
-        raise ValueError(f'Получен неизвестный статус - {status}.')
-    verdict = HOMEWORK_VERDICTS[status]
-    return PARSE_STATUS_PHRASE.format(homework_name, verdict)
+        raise ValueError(PARSE_STATUS_ERROR.format(status))
+    return PARSE_STATUS.format(homework_name, HOMEWORK_VERDICTS[status])
 
 
 def main():
-    """.
-    Основная логика работы бота.
-    """
-    last_send = {
-        'error': None,
-    }
-
+    """Основная логика работы бота."""
+    current_timestamp = int(time.time()) - 24 * 60 * 60
+    status_message = ''
+    error_message = ''
     if not check_tokens():
-        logging.critical('Отсутствуют все необходимые токены.')
-        exit()
-
-    bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    timestamp = int(time.time())
+        logging.critical('Отсутствуют токены')
+        sys.exit(1)
 
     while True:
         try:
-            response = get_api_answer(timestamp)
-            homeworks = check_response(response)
-            if len(homeworks) == 0:
-                logging.debug('Ответ API пуст: нет домашних работ.')
-                break
-            for homework in homeworks:
-                message = parse_status(homework)
-                if last_send.get(homework['homework_name']) != message:
-                    send_message(bot, message)
-                    last_send[homework['homework_name']] = message
-            timestamp = response.get('current_date', timestamp)
-        except Exception as error:
-            message = f'Сбой в работе программы: {error}'
-            if last_send['error'] != message:
+            bot = telegram.Bot(token=TELEGRAM_TOKEN)
+            response = get_api_answer(current_timestamp)
+            current_timestamp = response.get('current_date')
+            message = parse_status(check_response(response))
+            if message != status_message:
                 send_message(bot, message)
-                last_send['error'] = message
-        else:
-            last_send['error'] = None
+                status_message = message
+        except Exception as error:
+            logging.error(error)
+            message = f'Сбой в работе программы: {error}'
+            if message != error_message:
+                send_message(bot, message)
+                error_message = message
         finally:
             time.sleep(RETRY_PERIOD)
 
@@ -151,7 +150,7 @@ if __name__ == '__main__':
         level=logging.DEBUG,
         format=('%(asctime)s - %(levelname)s - %(name)s - %(funcName)s - '
                 '%(lineno)s - %(message)s'),
-        stream=sys.stdout,
+        filename='main.log',
     )
     main()
     # from unittest import TestCase, mock, main as uni_main
