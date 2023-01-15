@@ -7,7 +7,6 @@ import requests
 import telegram
 from dotenv import load_dotenv
 from http import HTTPStatus
-from http_exceptions import BadRequestException
 
 load_dotenv()
 
@@ -67,7 +66,7 @@ def get_api_answer(timestamp):
                         f'params = {payload}')
 
     if response_from_api.status_code != HTTPStatus.OK:
-        raise BadRequestException(
+        raise Exception(
             f'Ошибка API запроса - {response_from_api.status_code}'
         )
     response = response_from_api.json()
