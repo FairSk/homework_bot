@@ -1,7 +1,9 @@
 from http import HTTPStatus
 import logging
 import os
+import sys
 import time
+
 
 from dotenv import load_dotenv
 import requests
@@ -24,6 +26,7 @@ HOMEWORK_VERDICTS = {
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
 }
 
+TOKEN_LIST = ['PRACTICUM_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN']
 PARSE_STATUS = 'Изменился статус проверки работы "{}". {}'
 GET_API_ANSWER = ('Ошибка запроса к API адресу: {},'
                   'link = {}, headers = {}, params = {}')
@@ -31,18 +34,23 @@ CHECK_RESPONSE = ('Возвращен неверный тип данных. Ож
                   'а получен - {}')
 PARSE_STATUS_ERROR = 'Получен неизвестный статус - {}.'
 MAIN = 'Сбой в работе программы: {}'
+MESSAGE_SENT = 'Бот отправил сообщение {}'
+MESSAGE_SENT_ERROR = 'Ошибка отправки сообщения - {}({})'
 
 
 def check_tokens():
     """.
     Проверяет доступность переменных окружения.
     """
-    token_list = ['PRACTICUM_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN']
-    for token in token_list:
+    missed_tokens = []
+    for token in TOKEN_LIST:
         if globals()[token] is None:
-            logging.critical(f'Отсутствует токен - {token}')
-            return False
-    return True
+            missed_tokens += token
+    if len(missed_tokens) > 0:
+        logging.critical(f'Отсутствует(ют) токен(ы) - {missed_tokens}')
+        return False
+    else:
+        return True
 
 
 def send_message(bot, message):
@@ -51,9 +59,9 @@ def send_message(bot, message):
     """
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
-        logging.debug(f'Бот отправил сообщение {message}')
+        logging.debug(MESSAGE_SENT.format(message))
     except Exception as error:
-        logging.exception(f'Ошибка отправки сообщения - {error}({message})')
+        logging.exception(MESSAGE_SENT_ERROR.format(error, message))
 
 
 def get_api_answer(timestamp):
@@ -65,16 +73,13 @@ def get_api_answer(timestamp):
         response_from_api = requests.get(ENDPOINT,
                                          headers=HEADERS,
                                          params=payload)
-    # Тут я попытался обработать ислючение, но пайтест не пропускает почему-то
-    # except requests.RequestException as error:
-        # raise requests.RequestException(
-    except Exception as error:
-        raise Exception(
+    except requests.RequestException as error:
+        raise ConnectionError(
             GET_API_ANSWER.format(error, ENDPOINT, HEADERS, payload)
         )
 
     if response_from_api.status_code != HTTPStatus.OK:
-        raise requests.HTTPError(
+        raise StatusCodeError(
             GET_API_ANSWER.format(response_from_api.status_code, ENDPOINT,
                                   HEADERS, payload)
         )
