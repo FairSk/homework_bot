@@ -1,7 +1,6 @@
 from http import HTTPStatus
 import logging
 import os
-import sys
 import time
 
 
@@ -30,12 +29,19 @@ TOKEN_LIST = ['PRACTICUM_TOKEN', 'TELEGRAM_CHAT_ID', 'TELEGRAM_TOKEN']
 PARSE_STATUS = 'Изменился статус проверки работы "{}". {}'
 GET_API_ANSWER = ('Ошибка запроса к API адресу: {},'
                   'link = {}, headers = {}, params = {}')
-CHECK_RESPONSE = ('Возвращен неверный тип данных. Ожидается - dict,'
-                  'а получен - {}')
+CHECK_RESPONSE_DICT = ('Возвращен неверный тип данных. Ожидается - dict,'
+                       'а получен - {}')
+CHECK_RESPONSE_LIST = ('Возвращен неверный тип данных. Ожидается - list,'
+                       'а получен - {}')
 PARSE_STATUS_ERROR = 'Получен неизвестный статус - {}.'
 MAIN = 'Сбой в работе программы: {}'
 MESSAGE_SENT = 'Бот отправил сообщение {}'
 MESSAGE_SENT_ERROR = 'Ошибка отправки сообщения - {}({})'
+BOT_STARTED = 'Бот запущен'
+MISSING_TOKENS = 'Отсутствует(ют) токен(ы) - {}'
+MISSING_HW_NAME = 'Отсутствует имя домашней работы.'
+MISSING_STATUS = 'Отсутствует статус работы.'
+MISSING_HW_KEY = 'Возвращен ответ без ключа homeworks'
 
 
 def check_tokens():
@@ -47,7 +53,7 @@ def check_tokens():
         if globals()[token] is None:
             missed_tokens += token
     if len(missed_tokens) > 0:
-        logging.critical(f'Отсутствует(ют) токен(ы) - {missed_tokens}')
+        logging.critical(MISSING_TOKENS.format(missed_tokens))
         return False
     else:
         return True
@@ -79,14 +85,15 @@ def get_api_answer(timestamp):
         )
 
     if response_from_api.status_code != HTTPStatus.OK:
-        raise StatusCodeError(
+        raise ConnectionError(
             GET_API_ANSWER.format(response_from_api.status_code, ENDPOINT,
                                   HEADERS, payload)
         )
     response = response_from_api.json()
-    if response.get('error') or response.get('code') is not None:
-        raise ValueError(GET_API_ANSWER.format(response, ENDPOINT,
-                                               HEADERS, payload))
+    for error_word in ['error', 'code']:
+        if error_word in response:
+            raise ValueError(GET_API_ANSWER.format(error_word, ENDPOINT,
+                                                   HEADERS, payload))
     return response
 
 
@@ -95,15 +102,15 @@ def check_response(response):
     Проверяет ответ API на соответствие документации.
     """
     if not isinstance(response, dict):
-        raise TypeError(CHECK_RESPONSE.format(type(response)))
+        raise TypeError(CHECK_RESPONSE_DICT.format(type(response)))
 
     try:
         homeworks = response['homeworks']
         if not isinstance(homeworks, list):
-            raise TypeError(CHECK_RESPONSE.format(type(response)))
+            raise TypeError(CHECK_RESPONSE_LIST.format(type(response)))
     except KeyError:
-        raise KeyError('Возвращен ответ без ключа homeworks')
-    return homeworks[0]
+        raise KeyError(MISSING_HW_KEY)
+    return homeworks
 
 
 def parse_status(homework):
@@ -111,9 +118,9 @@ def parse_status(homework):
     Извлекает из информации о конкретной домашней работе статус этой работы
     """
     if 'homework_name' not in homework:
-        raise KeyError('Отсутствует имя домашней работы.')
+        raise KeyError(MISSING_HW_NAME)
     if 'status' not in homework:
-        raise KeyError('Отсутствует статус.')
+        raise KeyError(MISSING_STATUS)
     homework_name = homework.get('homework_name')
     status = homework.get('status')
     if status not in HOMEWORK_VERDICTS.keys():
@@ -123,28 +130,27 @@ def parse_status(homework):
 
 def main():
     """Основная логика работы бота."""
-    current_timestamp = int(time.time()) - 24 * 60 * 60
-    status_message = ''
-    error_message = ''
+    current_timestamp = 0
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
     if not check_tokens():
-        logging.critical('Отсутствуют токены')
-        sys.exit(1)
+        raise ValueError(check_tokens())
 
     while True:
         try:
-            bot = telegram.Bot(token=TELEGRAM_TOKEN)
             response = get_api_answer(current_timestamp)
-            current_timestamp = response.get('current_date')
-            message = parse_status(check_response(response))
-            if message != status_message:
+            homework = check_response(response)
+            message = parse_status(homework[0])
+            if len(homework) > 0:
                 send_message(bot, message)
-                status_message = message
+                current_timestamp = response.get('current_date',
+                                                 current_timestamp)
         except Exception as error:
-            logging.error(error)
-            message = f'Сбой в работе программы: {error}'
-            if message != error_message:
+            logging.error(MESSAGE_SENT_ERROR.format(error, message))
+            message = MAIN.format(error)
+            try:
                 send_message(bot, message)
-                error_message = message
+            except Exception as error:
+                logging.error(MESSAGE_SENT_ERROR.format(error))
         finally:
             time.sleep(RETRY_PERIOD)
 
@@ -156,6 +162,7 @@ if __name__ == '__main__':
                 '%(lineno)s - %(message)s'),
         filename='main.log',
     )
+    logging.info(BOT_STARTED)
     main()
     # from unittest import TestCase, mock, main as uni_main
     # ReqEx = requests.RequestException
