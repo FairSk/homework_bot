@@ -1,13 +1,15 @@
 from http import HTTPStatus
 import logging
 import os
-import sys
 import time
 
 
 from dotenv import load_dotenv
 import requests
 import telegram
+
+import exceptions
+
 
 load_dotenv()
 
@@ -53,7 +55,6 @@ def check_tokens():
     if missed_tokens:
         logging.critical(MISSING_TOKENS.format(missed_tokens))
         raise ValueError(MISSING_TOKENS.format(missed_tokens))
-    return not missed_tokens
 
 
 def send_message(bot, message):
@@ -82,15 +83,16 @@ def get_api_answer(timestamp):
         )
 
     if response_from_api.status_code != HTTPStatus.OK:
-        raise ConnectionError(
+        raise exceptions.CodeStatusException(
             GET_API_ANSWER.format(response_from_api.status_code, ENDPOINT,
                                   HEADERS, payload)
         )
     response = response_from_api.json()
     for error_word in ['error', 'code']:
         if error_word in response:
-            raise ValueError(GET_API_ANSWER.format(error_word, ENDPOINT,
-                                                   HEADERS, payload))
+            raise exceptions.IncorrectResponseException(
+                GET_API_ANSWER.format(error_word, ENDPOINT,
+                                      HEADERS, payload))
     return response
 
 
@@ -103,10 +105,11 @@ def check_response(response):
 
     try:
         homeworks = response['homeworks']
-        if not isinstance(homeworks, list):
-            raise TypeError(CHECK_RESPONSE_LIST.format(type(response)))
     except KeyError:
         raise KeyError(MISSING_HOMEWORK_KEY)
+
+    if not isinstance(homeworks, list):
+        raise TypeError(CHECK_RESPONSE_LIST.format(type(response)))
     return homeworks
 
 
@@ -136,27 +139,29 @@ def main():
         try:
             response = get_api_answer(current_timestamp)
             homeworks = check_response(response)
-            if homeworks:
-                message = parse_status(homeworks[0])
-                send_message(bot, message)
-                current_timestamp = response.get('current_date',
-                                                 current_timestamp)
+            if not homeworks:
+                continue
+            message = parse_status(homeworks[0])
+            send_message(bot, message)
+            current_timestamp = response.get('current_date',
+                                             current_timestamp)
         except Exception as error:
             message = MAIN.format(error)
-            logging.error(MESSAGE_SENT_ERROR.format(error, message))
-            send_message(bot, message)
+            logging.error(message)
         finally:
             time.sleep(RETRY_PERIOD)
 
 
 if __name__ == '__main__':
+    stream_handler = logging.StreamHandler()
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s - %(levelname)s - %(name)s - %(funcName)s - '
                '%(lineno)s - %(message)s',
         filename=__file__ + '.log',
-        stream=sys.stdout
+        handlers=stream_handler
     )
+
     logging.info(BOT_STARTED)
     main()
     # from unittest import TestCase, mock, main as uni_main
