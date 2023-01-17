@@ -1,6 +1,7 @@
 from http import HTTPStatus
 import logging
 import os
+import sys
 import time
 
 
@@ -39,24 +40,20 @@ MESSAGE_SENT = 'Бот отправил сообщение {}'
 MESSAGE_SENT_ERROR = 'Ошибка отправки сообщения - {}({})'
 BOT_STARTED = 'Бот запущен'
 MISSING_TOKENS = 'Отсутствует(ют) токен(ы) - {}'
-MISSING_HW_NAME = 'Отсутствует имя домашней работы.'
+MISSING_HOMEWORK_NAME = 'Отсутствует имя домашней работы.'
 MISSING_STATUS = 'Отсутствует статус работы.'
-MISSING_HW_KEY = 'Возвращен ответ без ключа homeworks'
+MISSING_HOMEWORK_KEY = 'Возвращен ответ без ключа homeworks'
 
 
 def check_tokens():
     """.
     Проверяет доступность переменных окружения.
     """
-    missed_tokens = []
-    for token in TOKEN_LIST:
-        if globals()[token] is None:
-            missed_tokens += token
-    if len(missed_tokens) > 0:
+    missed_tokens = [token for token in TOKEN_LIST if globals()[token] is None]
+    if missed_tokens:
         logging.critical(MISSING_TOKENS.format(missed_tokens))
-        return False
-    else:
-        return True
+        raise ValueError(MISSING_TOKENS.format(missed_tokens))
+    return not missed_tokens
 
 
 def send_message(bot, message):
@@ -109,7 +106,7 @@ def check_response(response):
         if not isinstance(homeworks, list):
             raise TypeError(CHECK_RESPONSE_LIST.format(type(response)))
     except KeyError:
-        raise KeyError(MISSING_HW_KEY)
+        raise KeyError(MISSING_HOMEWORK_KEY)
     return homeworks
 
 
@@ -118,39 +115,36 @@ def parse_status(homework):
     Извлекает из информации о конкретной домашней работе статус этой работы
     """
     if 'homework_name' not in homework:
-        raise KeyError(MISSING_HW_NAME)
+        raise KeyError(MISSING_HOMEWORK_NAME)
     if 'status' not in homework:
         raise KeyError(MISSING_STATUS)
-    homework_name = homework.get('homework_name')
     status = homework.get('status')
     if status not in HOMEWORK_VERDICTS.keys():
         raise ValueError(PARSE_STATUS_ERROR.format(status))
-    return PARSE_STATUS.format(homework_name, HOMEWORK_VERDICTS[status])
+    return PARSE_STATUS.format(homework.get('homework_name'),
+                               HOMEWORK_VERDICTS[status])
 
 
 def main():
     """Основная логика работы бота."""
+    check_tokens()
+
     current_timestamp = 0
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    if not check_tokens():
-        raise ValueError(check_tokens())
 
     while True:
         try:
             response = get_api_answer(current_timestamp)
-            homework = check_response(response)
-            message = parse_status(homework[0])
-            if len(homework) > 0:
+            homeworks = check_response(response)
+            if homeworks:
+                message = parse_status(homeworks[0])
                 send_message(bot, message)
                 current_timestamp = response.get('current_date',
                                                  current_timestamp)
         except Exception as error:
-            logging.error(MESSAGE_SENT_ERROR.format(error, message))
             message = MAIN.format(error)
-            try:
-                send_message(bot, message)
-            except Exception as error:
-                logging.error(MESSAGE_SENT_ERROR.format(error))
+            logging.error(MESSAGE_SENT_ERROR.format(error, message))
+            send_message(bot, message)
         finally:
             time.sleep(RETRY_PERIOD)
 
@@ -158,9 +152,10 @@ def main():
 if __name__ == '__main__':
     logging.basicConfig(
         level=logging.DEBUG,
-        format=('%(asctime)s - %(levelname)s - %(name)s - %(funcName)s - '
-                '%(lineno)s - %(message)s'),
-        filename='main.log',
+        format='%(asctime)s - %(levelname)s - %(name)s - %(funcName)s - '
+               '%(lineno)s - %(message)s',
+        filename=__file__ + '.log',
+        stream=sys.stdout
     )
     logging.info(BOT_STARTED)
     main()
