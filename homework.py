@@ -3,7 +3,6 @@ import logging
 import os
 import time
 
-
 from dotenv import load_dotenv
 import requests
 import telegram
@@ -132,22 +131,25 @@ def main():
     """Основная логика работы бота."""
     check_tokens()
 
-    current_timestamp = 0
+    timestamp = 0
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
     while True:
         try:
-            response = get_api_answer(current_timestamp)
+            response = get_api_answer(timestamp)
             homeworks = check_response(response)
             if not homeworks:
                 continue
             message = parse_status(homeworks[0])
             send_message(bot, message)
-            current_timestamp = response.get('current_date',
-                                             current_timestamp)
+            # не понимаю как это сделать
+            timestamp = response.get('current_date',
+                                     timestamp)
         except Exception as error:
             message = MAIN.format(error)
             logging.error(message)
+            # и это
+            send_message(bot, message)
         finally:
             time.sleep(RETRY_PERIOD)
 
@@ -158,8 +160,9 @@ if __name__ == '__main__':
         level=logging.DEBUG,
         format='%(asctime)s - %(levelname)s - %(name)s - %(funcName)s - '
                '%(lineno)s - %(message)s',
-        filename=__file__ + '.log',
-        handlers=stream_handler
+        handlers=(logging.StreamHandler(),
+                  logging.FileHandler(filename=__file__ + '.log',
+                                      mode='a', encoding=None, delay=False))
     )
 
     logging.info(BOT_STARTED)
