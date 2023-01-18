@@ -63,10 +63,10 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logging.debug(MESSAGE_SENT.format(message))
+        return True
     except Exception as error:
         logging.exception(MESSAGE_SENT_ERROR.format(error, message))
-        raise exceptions.SendMessageException(
-            MESSAGE_SENT_ERROR.format(error, message))
+        return False
 
 
 def get_api_answer(timestamp):
@@ -143,15 +143,13 @@ def main():
             if not homeworks:
                 continue
             message = parse_status(homeworks[0])
-            send_message(bot, message)
-            # не понимаю как это сделать
-            timestamp = response.get('current_date',
-                                     timestamp)
+            if send_message(bot, message):
+                timestamp = response.get('current_date',
+                                         timestamp)
         except Exception as error:
             message = MAIN.format(error)
-            logging.error(message)
-            # и это
-            send_message(bot, message)
+            if send_message(bot, message):
+                logging.error(message)
         finally:
             time.sleep(RETRY_PERIOD)
 
