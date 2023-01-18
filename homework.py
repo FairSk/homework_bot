@@ -65,6 +65,8 @@ def send_message(bot, message):
         logging.debug(MESSAGE_SENT.format(message))
     except Exception as error:
         logging.exception(MESSAGE_SENT_ERROR.format(error, message))
+        raise exceptions.SendMessageException(
+            MESSAGE_SENT_ERROR.format(error, message))
 
 
 def get_api_answer(timestamp):
