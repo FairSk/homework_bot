@@ -148,8 +148,9 @@ def main():
                                          timestamp)
         except Exception as error:
             message = MAIN.format(error)
-            if send_message(bot, message):
-                logging.error(message)
+            logging.error(message)
+            if not send_message(bot, message):
+                raise exceptions.SendMessageException(message)
         finally:
             time.sleep(RETRY_PERIOD)
 
